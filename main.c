@@ -1,11 +1,11 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <stdlib.h>
 
 
 /* This line specifies the frequency your AVR is running at.
    This code supports 20 MHz, 16 MHz and 8MHz */
-#define F_CPU 8000000
 
 // These lines specify what pin the LED strip is on.
 // You will either need to attach the LED strip's data line to PB0 or change these
@@ -29,8 +29,10 @@
 //defines the voltage value picked up on PC0
 volatile double voltage;
 
-//**************************************************************STRUCTURES*************************************************************************
+//state of the program, changed accordingly when a communication byte is recognized
+volatile int state = 0;
 
+//***************************************************************************************************************************************************STRUCTURES
 
 /*  The rgb_color struct represents the color for an 8-bit RGB LED.
 
@@ -51,7 +53,23 @@ typedef struct rgb_color
 //declare rgb array
 rgb_color colors[LED_COUNT];
 
-//************************************************LED Writing**********************************************************************
+//******************************************************************************************************************************************Function Prototypes
+
+void __attribute__((noinline)) led_strip_write(rgb_color * colors, unsigned int count);
+void USART0Init(void);
+int recieveThreeDigitNumber();
+void ADCInit();
+void ShiftPattern(rgb_color* colorArray);
+void updateState(int newState);
+void connectionSuccess();
+void RecieveColour();
+void Off();
+void On();
+void rainbowPattern();
+void smartLights();
+
+
+//**************************************************************************************************************************************************LED WRITING
 
 
 /** led_strip_write sends a series of colors to the LED strip, updating the LEDs.
@@ -152,7 +170,7 @@ void __attribute__((noinline)) led_strip_write(rgb_color * colors, unsigned int 
   _delay_us(50);  // Hold the line low for 15 microseconds to send the reset signal.
 }
 
-//******************************************************************************************USART***********************************************************
+//********************************************************************************************************************************************************USART
 
 void USART0Init(void)
 {
@@ -186,7 +204,7 @@ int recieveThreeDigitNumber()
 	return val;
 }
 
-//***********************************************ADC********************************************************************
+//**********************************************************************************************************************************************************ADC
 
 //setup continuous sampling with interrupts on completion on PA0
 void ADCInit()
@@ -209,33 +227,38 @@ void ADCInit()
 
 	sei();//enable interrupts
 }
-//*****************************************************************************************AUX FUNCTIONS***************************************************
 
+//************************************************************************************************************************************************AUX FUNCTIONS
+
+
+//Used to shift a static pattern across the strip
 void ShiftPattern(rgb_color* colorArray)
 {
+	//moving backwards through the light strip...
 	for(int i = LED_COUNT; i >= 0; i--)
 	{
+		//if this is the first LED, set it equal to whatever the last LED is
 		if(i == 0)
-		{
 			colorArray[0] = colorArray[LED_COUNT-1];
-		}
 		
+		//if its not the first LED then set it to whatever the LED infront of it is
 		else
-		{
 			colorArray[i]=colorArray[i-1];
-		}
 	}
+	//this delay determines how fast the pattern moves across the strip
 	_delay_ms(20);
+	
+	//write the data out after the entire line has been shifted
 	led_strip_write(colorArray, LED_COUNT);
 }
 
 
-//************************************************State Functions**********************************************************************
+//**********************************************************************************************************************************************State Functions
 
 /*
 			State:												Communication Byte:													Associated Function in Micro					Associated Function in Python
 			________________________________________________________________________________________________________________________________________________________________________________________________________
-			0: State at beginning of program					NONE																NONE											NONE
+			0: State of nothingness								NONE																NONE											NONE
 			
 			1: Connection Success								A: Sent when computer and micro are successfully connected			connectionSuccess()								connectBluetoothDevice()
 			
@@ -246,11 +269,33 @@ void ShiftPattern(rgb_color* colorArray)
 			4: Turn lights on white (50,50,50)					D: Sent when user wants the lights on								On()											On()
 			
 			5: Lights are changed based on photosensor			E: Sent when user actives smartlights								smartLights()									smartLights()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+			6: Dynamic rainbow pattern on the strip				F: sent by user to activate pattern									rainbowPattern()								rainbow Pattern()
+
+
 */
-
-
-
-int state = 0;
 
 //sets the new state
 void updateState(int newState)
@@ -306,103 +351,57 @@ void Off()
 {	
 	unsigned int i;
 	for(i = 0; i < LED_COUNT; i++)
-	{
 		colors[i] = (rgb_color){0,0,0};
-	}
 	
 	led_strip_write(colors, LED_COUNT);
+	updateState(0);
 }
 
 //turn on all the lights, --- state: 4, communication byte: 'D'
 void On()
 {
-	static int R = 0;
-	static int G = 0;
-	static int B = 0;
-	
-	if(state)//previousState == state)
-	{
-		R += 50;
-		if(R >= 255)
-			R = 50;
-			
-		G += 50;
-		if(G >= 255)
-			G = 50;
-		
-		B += 50;
-		if(B >= 255)
-			B = 50;
-	}
-	
 	unsigned int i;
 	for(i = 0; i < LED_COUNT; i++)
-	{
-		colors[i] = (rgb_color){50 + R, 50 + G, 50 + B};
-	}
+		colors[i] = (rgb_color){50, 50, 50};
 	
 	led_strip_write(colors, LED_COUNT);
+	updateState(0);
 }
 
-void Rainbowpattern()
+//dynamic rainbow pattern shifts across strip
+void rainbowPattern()
 {
-	//static unsigned int time = 0;
-	//while(state == 6)
-	//{
-		//for(int i = 0; i < LED_COUNT; i++)
-		//{
-			//unsigned char x = (time >> 2) - 8*i;
-			//colors[i] = (rgb_color){ 255 - x, x, 255-x };
-		//}
-		//
-		//led_strip_write(colors, LED_COUNT);
-		//_delay_ms(20);
-		//time += 20;
-	//}
-
-	for(int i = 0; i < LED_COUNT; i+= 7)
+	//violet, indigo, blue, green, yellow, orange, red
+	rgb_color rainbow[7] = {
+							{148,0,211},
+							{75,0,130},
+							{0,0,255},
+							{0,255,0},
+							{255,255,0},
+							{255,127,0},
+							{255,0,0}
+							};
+							
+	int counter = 0;
+	for(int i = 0; i < LED_COUNT; i++)
 	{
-		colors[i] = (rgb_color){148,0,211};
-		colors[i+1] = (rgb_color){75,0,130};
-		colors[i+2] = (rgb_color){0,0,255};
-		colors[i+3] = (rgb_color){0,255,0};
-		colors[i+4] = (rgb_color){255,255,0};
-		colors[i+5] = (rgb_color){255,127,0};
-		colors[i+6] = (rgb_color){255,0,0};
+		colors[i] = rainbow[counter];
+		counter++;
+		if(counter == 7)
+			counter = 0;
 	}	
 	
 	while(state == 6)
-	{
 		ShiftPattern(colors);
-	}
 
 }
 
-
-void pattern()
-{
-	for(int i = 0; i < LED_COUNT; i+= 7)
-	{
-		colors[i] = (rgb_color){0,255,0};
-		colors[i+1] = (rgb_color){0,255,0};
-		colors[i+2] = (rgb_color){255,255,0};
-		colors[i+3] = (rgb_color){255,255,0};
-		colors[i+4] = (rgb_color){255,255,0};
-		colors[i+5] = (rgb_color){255,0,0};
-		colors[i+6] = (rgb_color){255,0,0};
-	}
-	
-		while(state == 6)
-		{
-			ShiftPattern(colors);
-		}
-}
-
-
+//uses ADC to sample a voltage divider between a 10k resistor and a photo resistor I had lying around
 void smartLights()
 {
 	while(state == 5)
 	{	
+		//average 25 samples over 25ms so the dimming/bright feature doesnt seem as spikey
 		int sum =0;
 		int lightLevel;
 		for(int i =0; i<25;i++ )
@@ -410,11 +409,16 @@ void smartLights()
 			sum += (voltage/5.0)*255;
 			_delay_ms(1);
 		}
-		lightLevel = (sum/50) + 50*lightLevel/255;
+		lightLevel = (sum/25);
 		
+		//arbitrary scale factor, needs some work...
+		lightLevel += 50*lightLevel/255;
+		
+		//make sure the light level never falls out of range, could also use some work
 		if(lightLevel < 0)
 			lightLevel = 0;
 			
+		//write the color out to the strip
 		unsigned int i;
 		for(i = 0; i < LED_COUNT; i++)
 		{
@@ -426,11 +430,10 @@ void smartLights()
 }
 
 
-//****************************************************************************************MAIN*******************************************************************
+//*********************************************************************************************************************************************************main
 
 int main (void)
 {
-
 	//Initialize USART0 and ADC
 	USART0Init();
 	ADCInit();
@@ -438,50 +441,53 @@ int main (void)
 	//enable global interrupts
 	sei();
 	while(1)
-	{		//re enable interrupts on USART receive 
-			UCSR0B |= (1<<RXEN0)|(1<<RXCIE0);
-			switch (state)
-			{
-				//connect to blue tooth
-				case 1:
-				connectionSuccess();
-				break;
+	{			
+		//re enable interrupts on USART receive 
+		UCSR0B |= (1<<RXEN0)|(1<<RXCIE0);
+			
+		//based on the state of the program, decide which function to proceed with	
+		switch (state)
+		{
+			//connect to blue tooth
+			case 1:
+			connectionSuccess();
+			break;
 				
-				//set to a solid colour
-				case 2:
-				RecieveColour();
-				break;
+			//set to a solid colour
+			case 2:
+			RecieveColour();
+			break;
 				
-				//turn on the lights
-				case 3:
-				On();
-				break;
+			//turn on the lights
+			case 3:
+			On();
+			break;
 				
-				//turn off the lights
-				case 4:
-				Off();
-				break;
+			//turn off the lights
+			case 4:
+			Off();
+			break;
 				
-				//let the lights decide how bright to be based on ambient light in the room
-				case 5:
-				smartLights();
-				break;
+			//let the lights decide how bright to be based on ambient light in the room
+			case 5:
+			smartLights();
+			break;
 				
-				case 6:
-				Rainbowpattern();
-				break;
-			}
+			case 6:
+			rainbowPattern();
+			break;
+		}
 	}
 }
 
-//***********************************************************************************ISRS********************************************************************************
+//**********************************************************************************************************************************************************ISR
+
 // Interrupt service routine for the ADC completion, read the voltage and put it in the variable "voltage" which is a volatile int
 ISR(ADC_vect)
 {
 	cli();		
 	voltage = ADCH*5/255.0;
 	sei();		
-
 }
 
 
@@ -489,33 +495,35 @@ ISR(ADC_vect)
 ISR(USART_RX_vect)
 {
 	cli();
+	
 	//read in the byte
 	uint8_t temp;
-	temp=UDR0;
+	temp = UDR0;
 	
-	//each case is handled based on its respective Communication Byte (see above)
+	//each case is handled based on its respective Communication Byte (for more information, see the states table commented under the state functions header)
 	switch (temp)
 	{
-		//connect to blue tooth
+		//connect to bluetooth
 		case 'A':
 		updateState(1);
 		break;
 				 
-		//set to a solid colour
+		//solid colour
 		case 'B':
 		updateState(2);
 		break;
 				 
-		//turn off the lights
+		//turn off
 		case 'C':
 		updateState(3);
 		break;
 				 
-		//turn on the lights like a dimmer, always white
+		//turn on
 		case 'D':
 		updateState(4);
 		break;
 				 
+		//Smart lights
 		case 'E':
 		updateState(5);
 		break;
@@ -527,3 +535,18 @@ ISR(USART_RX_vect)
 	sei();
 }
 
+//To be added**************************************************************************************************************************************************
+
+	//static unsigned int time = 0;
+	//while(state == 6)
+	//{
+	//for(int i = 0; i < LED_COUNT; i++)
+	//{
+	//unsigned char x = (time >> 2) - 8*i;
+	//colors[i] = (rgb_color){ 255 - x, x, 255-x };
+	//}
+	//
+	//led_strip_write(colors, LED_COUNT);
+	//_delay_ms(20);
+	//time += 20;
+	//}
