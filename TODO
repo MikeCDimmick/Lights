@@ -1,7 +1,0 @@
-Program various patterns into the micro
-
-make the initial bluetooth connection state flash an onboard LED instead of an LED on the 
-
-tune the photoresistor mode to be less of an eye sore
-
-add an interrupt for a button press (or two) so we can switch states without the computer
