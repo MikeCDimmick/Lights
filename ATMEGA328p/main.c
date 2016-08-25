@@ -15,6 +15,10 @@
 #define LED_STRIP_DDR  DDRB
 #define LED_STRIP_PIN  0
 
+#define LED_INDICATOR_PORT PORTB
+#define LED_INDICATOR_DDR  DDRB
+#define LED_INDICATOR_PIN  1
+
 //defines the baudrate and calculates the requires register value to set it
 #define USART_BAUDRATE 9600
 #define UBRR_VALUE (((F_CPU / (USART_BAUDRATE * 16UL))) - 1)
@@ -59,7 +63,7 @@ void __attribute__((noinline)) led_strip_write(rgb_color * colors, unsigned int 
 void USART0Init(void);
 int recieveThreeDigitNumber();
 void ADCInit();
-void ShiftPattern(rgb_color* colorArray);
+void shiftPattern(rgb_color* colorArray);
 void updateState(int newState);
 void connectionSuccess();
 void RecieveColour();
@@ -67,6 +71,7 @@ void Off();
 void On();
 void rainbowPattern();
 void smartLights();
+void indicator();
 
 
 //**************************************************************************************************************************************************LED WRITING
@@ -232,7 +237,7 @@ void ADCInit()
 
 
 //Used to shift a static pattern across the strip
-void ShiftPattern(rgb_color* colorArray)
+void shiftPattern(rgb_color* colorArray)
 {
 	//moving backwards through the light strip...
 	for(int i = LED_COUNT; i >= 0; i--)
@@ -250,6 +255,14 @@ void ShiftPattern(rgb_color* colorArray)
 	
 	//write the data out after the entire line has been shifted
 	led_strip_write(colorArray, LED_COUNT);
+}
+
+//Flash the onboard LED to show successful instruction
+void indicator()
+{
+	LED_INDICATOR_PORT |= (1<<LED_INDICATOR_PIN);
+	_delay_ms(200);
+	LED_INDICATOR_PORT &= ~(1<<LED_INDICATOR_PIN);	
 }
 
 
@@ -300,30 +313,14 @@ void ShiftPattern(rgb_color* colorArray)
 //sets the new state
 void updateState(int newState)
 {
+	//flash the indicator to show success
+	indicator();
 	state = newState;
 }
 
 //flashes first LED green three times to signify a success connection, --- state: 1, communication byte: 'A'
 void connectionSuccess()
 {
-	//set entire strip to 0,0,0
-	unsigned int i;
-	for(i = 0; i < LED_COUNT; i++)
-	{
-		colors[i] = (rgb_color){ 0,0,0 };
-	}
-	
-	//flash just the first LED 3 times
-	for(i=0; i < 3; i++)
-	{
-		colors[0] = (rgb_color){ 0,255,0 };
-		led_strip_write(colors, LED_COUNT);
-		_delay_ms(200);
-		colors[0] = (rgb_color){ 0,0,0 };
-		led_strip_write(colors, LED_COUNT);
-		_delay_ms(200);
-	}
-	
 	//update the state to 3 which turns on the LEDs on a low brightness setting
 	updateState(3);
 }
@@ -368,6 +365,39 @@ void On()
 	updateState(0);
 }
 
+//uses ADC to sample a voltage divider between a 10k resistor and a photo resistor I had lying around
+void smartLights()
+{
+	while(state == 5)
+	{
+		//average 25 samples over 25ms so the dimming/bright feature doesnt seem as spikey
+		int sum =0;
+		int lightLevel;
+		for(int i =0; i<25;i++ )
+		{
+			sum += (voltage/5.0)*255;
+			_delay_ms(1);
+		}
+		lightLevel = (sum/25);
+		
+		//arbitrary scale factor, needs some work...
+		lightLevel += 50*lightLevel/255;
+		
+		//make sure the light level never falls out of range, could also use some work
+		if(lightLevel < 0)
+		lightLevel = 0;
+		
+		//write the color out to the strip
+		unsigned int i;
+		for(i = 0; i < LED_COUNT; i++)
+		{
+			colors[i] = (rgb_color){lightLevel,lightLevel,lightLevel};
+		}
+		
+		led_strip_write(colors, LED_COUNT);
+	}
+}
+
 //dynamic rainbow pattern shifts across strip
 void rainbowPattern()
 {
@@ -392,41 +422,44 @@ void rainbowPattern()
 	}	
 	
 	while(state == 6)
-		ShiftPattern(colors);
+		shiftPattern(colors);
 
 }
 
-//uses ADC to sample a voltage divider between a 10k resistor and a photo resistor I had lying around
-void smartLights()
+void softLights()
 {
-	while(state == 5)
-	{	
-		//average 25 samples over 25ms so the dimming/bright feature doesnt seem as spikey
-		int sum =0;
-		int lightLevel;
-		for(int i =0; i<25;i++ )
-		{
-			sum += (voltage/5.0)*255;
-			_delay_ms(1);
-		}
-		lightLevel = (sum/25);
-		
-		//arbitrary scale factor, needs some work...
-		lightLevel += 50*lightLevel/255;
-		
-		//make sure the light level never falls out of range, could also use some work
-		if(lightLevel < 0)
-			lightLevel = 0;
+	rgb_color rainbow[7] = 
+			{
+			{70,0,130},
 			
-		//write the color out to the strip
-		unsigned int i;
-		for(i = 0; i < LED_COUNT; i++)
-		{
-			colors[i] = (rgb_color){lightLevel,lightLevel,lightLevel};
-		}
+			{139,0,139},
+			
+			{148,0,211},
+			
+			{0,255,0},
+			{255,255,0},
+			{255,127,0},
+			{255,0,0}
+			};
 		
+	int R = 0;
+	int B = 0;
+	while(state == 6)
+	{				
+		for(int i = 0; i < LED_COUNT; i++)
+		{
+			colors[i] = (rgb_color){R,0,B};
+		}
+		R+=2;
+		B++;
+		if(R > 255)
+		{
+			R = 0;
+			B = 0;
+		}
 		led_strip_write(colors, LED_COUNT);
 	}
+	
 }
 
 
@@ -437,6 +470,9 @@ int main (void)
 	//Initialize USART0 and ADC
 	USART0Init();
 	ADCInit();
+	
+	LED_INDICATOR_DDR |= (1<<LED_INDICATOR_PIN);
+
 	
 	//enable global interrupts
 	sei();
@@ -474,7 +510,7 @@ int main (void)
 			break;
 				
 			case 6:
-			rainbowPattern();
+			softLights();//rainbowPattern();
 			break;
 		}
 	}
