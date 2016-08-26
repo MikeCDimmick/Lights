@@ -1,5 +1,15 @@
+finish PCB Silk screen
+
+check over PCB
+
+Fix up python interface visually
+
+add more functionality to catch the python interface up with the AVR code
+
+check PCB again
+
+order PCB
+
 Program various patterns into the micro
 
 tune the photoresistor mode to be less of an eye sore
-
-add an interrupt for a button press (or two) so we can switch states without the computer
