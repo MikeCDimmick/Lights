@@ -4,17 +4,17 @@
 #include <stdlib.h>
 
 
-/* This line specifies the frequency your AVR is running at.
-   This code supports 20 MHz, 16 MHz and 8MHz */
+/* This code supports 20 MHz, 16 MHz and 8MHz */
 
 // These lines specify what pin the LED strip is on.
-// You will either need to attach the LED strip's data line to PB0 or change these
-// lines to specify a different pin.
 //data line is PB0
 #define LED_STRIP_PORT PORTB
 #define LED_STRIP_DDR  DDRB
 #define LED_STRIP_PIN  0
 
+
+// These lines specify what pin the Indicator LED is on.
+//data line is PB1
 #define LED_INDICATOR_PORT PORTB
 #define LED_INDICATOR_DDR  DDRB
 #define LED_INDICATOR_PIN  1
@@ -30,11 +30,16 @@
 //defines the number of levels the ADC can take on
 #define ADC_LEVELS 255
 
+//defines the number of states the computer has, discounting 0
+#define NUM_STATES 6
+
 //defines the voltage value picked up on PC0
 volatile double voltage;
 
 //state of the program, changed accordingly when a communication byte is recognized
 volatile int state = 0;
+
+
 
 //***************************************************************************************************************************************************STRUCTURES
 
@@ -90,6 +95,7 @@ void indicator();
   1 pulse  = 850 ns
   "period" = 1300 ns
  */
+
 void __attribute__((noinline)) led_strip_write(rgb_color * colors, unsigned int count) 
 {
   // Set the pin to be an output driving low.
@@ -233,6 +239,20 @@ void ADCInit()
 	sei();//enable interrupts
 }
 
+//**************************************************************************************************************************************EXTERNAL INTERRUPT INIT
+
+void INTInit()
+{
+	//Set external interrupts 0 and 1 to occur on the falling edge (going from high to low)
+	EICRA |= (1 << ISC01);
+	EICRA |= (1 << ISC11);
+	
+	
+	EIMSK |= (1 << INT0);
+	EIMSK |= (1 << INT1);
+}
+
+
 //************************************************************************************************************************************************AUX FUNCTIONS
 
 
@@ -261,8 +281,8 @@ void shiftPattern(rgb_color* colorArray)
 void indicator()
 {
 	LED_INDICATOR_PORT |= (1<<LED_INDICATOR_PIN);
-	_delay_ms(200);
-	LED_INDICATOR_PORT &= ~(1<<LED_INDICATOR_PIN);	
+	_delay_ms(10);
+	LED_INDICATOR_PORT &= ~(1<<LED_INDICATOR_PIN);
 }
 
 
@@ -320,7 +340,7 @@ void updateState(int newState)
 
 //flashes first LED green three times to signify a success connection, --- state: 1, communication byte: 'A'
 void connectionSuccess()
-{
+{		
 	//update the state to 3 which turns on the LEDs on a low brightness setting
 	updateState(3);
 }
@@ -462,15 +482,16 @@ void softLights()
 	
 }
 
-
 //*********************************************************************************************************************************************************main
 
 int main (void)
 {
-	//Initialize USART0 and ADC
+	//Initialize USART0, ADC on pin PC0 and INT0, INT1 
 	USART0Init();
 	ADCInit();
+	INTInit();
 	
+	//set up the data direction register for the indicator pin to be an output
 	LED_INDICATOR_DDR |= (1<<LED_INDICATOR_PIN);
 
 	
@@ -494,14 +515,14 @@ int main (void)
 			RecieveColour();
 			break;
 				
-			//turn on the lights
+			//turn off the lights
 			case 3:
-			On();
+			Off();
 			break;
 				
-			//turn off the lights
+			//turn on the lights
 			case 4:
-			Off();
+			On();
 			break;
 				
 			//let the lights decide how bright to be based on ambient light in the room
@@ -526,6 +547,17 @@ ISR(ADC_vect)
 	sei();		
 }
 
+//move the state up one, and wrap around if at the last state
+ISR(INT0_vect)
+{
+	updateState(3);
+}
+
+//move the state down one, and wrap around if at the first state
+ISR(INT1_vect)
+{
+	updateState(5);
+}
 
 //RX Complete interrupt service routine
 ISR(USART_RX_vect)
@@ -570,6 +602,7 @@ ISR(USART_RX_vect)
 	}
 	sei();
 }
+
 
 //To be added**************************************************************************************************************************************************
 
